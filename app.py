@@ -19,7 +19,6 @@ st.markdown("""
     .main-header { font-size: 2.5rem; font-weight: bold; color: #1f77b4; text-align: center; margin-bottom: 2rem; }
     .stExpander { border: 1px solid #333; border-radius: 8px; margin-bottom: 10px; background-color: #1a1a1a; }
     .search-result-card { background-color: #262730; padding: 20px; border-radius: 10px; border-left: 5px solid #ff4b4b; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin-bottom: 20px; }
-    .metric-container { background-color: #0e1117; padding: 15px; border-radius: 10px; border: 1px solid #333; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -68,6 +67,8 @@ col_justification = get_col(df_priority, ['justification', 'justifikasi', 'Justi
 col_2024 = get_col(df_priority, ['2024'])
 col_2025 = get_col(df_priority, ['2025'])
 col_change = get_col(df_priority, ['change_pct', 'change_percentage'])
+col_lat = get_col(df_priority, ['latitude', 'lat'])
+col_lon = get_col(df_priority, ['longitude', 'lon'])
 
 # Sidebar Filters
 st.sidebar.header("⚙️ Filter Global")
@@ -166,6 +167,44 @@ sim_col1, sim_col2, sim_col3 = st.columns(3)
 sim_col1.metric("Potensi Kebocoran Terdeteksi", f"Rp {total_potential_fraud:,.0f}")
 sim_col2.metric("Biaya Audit Diperlukan", f"Rp {total_audit_cost:,.0f}")
 sim_col3.metric("Estimasi Penghematan Bersih", f"Rp {net_savings:,.0f}", delta=f"{num_high_risk} Wilayah High Risk")
+
+st.markdown("---")
+
+# ==============================================================================
+# 🌟 FITUR 3: PETA INTERAKTIF JAWA TIMUR (DIPERBAIKI - TANPA TOKEN)
+# ==============================================================================
+st.subheader("🗺️ Peta Sebaran Risiko Jawa Timur")
+if col_lat and col_lon:
+    map_data = df_filtered[[col_nama, col_lat, col_lon, col_score, col_category]].dropna()
+    
+    if len(map_data) > 0:
+        # Buat peta dasar
+        fig_map = px.scatter_mapbox(
+            map_data,
+            lat=col_lat, 
+            lon=col_lon,
+            hover_name=col_nama,
+            hover_data=[col_category, col_score],
+            zoom=7,
+            height=500
+        )
+        
+        # Update marker dengan konfigurasi sederhana yang kompatibel
+        fig_map.update_traces(
+            marker=dict(size=10, opacity=0.7)
+        )
+        
+        # Gunakan style open-street-map (gratis, tidak perlu token)
+        fig_map.update_layout(
+            mapbox_style="open-street-map",
+            margin={"r":0,"t":0,"l":0,"b":0}
+        )
+        
+        st.plotly_chart(fig_map, use_container_width=True)
+    else:
+        st.info("ℹ️ Tidak ada data koordinat untuk ditampilkan di peta.")
+else:
+    st.info("ℹ️ Data koordinat (Latitude/Longitude) tidak tersedia.")
 
 st.markdown("---")
 
