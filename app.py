@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -13,21 +15,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Custom CSS for Premium Look
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .stExpander {
-        border: 1px solid #333;
-        border-radius: 5px;
-        margin-bottom: 10px;
-    }
+    .main-header { font-size: 2.5rem; font-weight: bold; color: #1f77b4; text-align: center; margin-bottom: 2rem; }
+    .stExpander { border: 1px solid #333; border-radius: 8px; margin-bottom: 10px; background-color: #1a1a1a; }
+    .search-result-card { background-color: #262730; padding: 20px; border-radius: 10px; border-left: 5px solid #ff4b4b; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin-bottom: 20px; }
+    .metric-container { background-color: #0e1117; padding: 15px; border-radius: 10px; border: 1px solid #333; }
+    /* Highlight for High Risk */
+    .high-risk-text { color: #ff4b4b; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -36,314 +32,218 @@ st.title("🎯 Sistem Rekomendasi Prioritas Audit Penyaluran Bantuan Sosial")
 st.markdown("**Jawa Timur 2024-2025** | Hybrid Machine Learning & Signature Analysis")
 st.markdown("---")
 
-# Helper function untuk parse angka (handle format Indonesia)
+# Helper function untuk parse angka
 def parse_number(value):
-    """Convert string dengan thousand separator ke float"""
-    if pd.isna(value) or value == '' or value is None:
-        return 0.0
-    try:
-        # Jika sudah float/int
-        return float(value)
-    except (ValueError, TypeError):
-        try:
-            # Jika string dengan format Indonesia (titik sebagai pemisah ribuan)
-            clean_value = str(value).replace('.', '')
-            # Handle jika ada koma sebagai desimal
-            clean_value = clean_value.replace(',', '.')
-            return float(clean_value)
-        except:
-            return 0.0
+    if pd.isna(value) or value == '' or value is None: return 0.0
+    try: return float(value)
+    except:
+        try: return float(str(value).replace('.', '').replace(',', '.'))
+        except: return 0.0
 
-# Load data dengan error handling
+# Load data
 @st.cache_data
 def load_data():
     try:
-        # Load scored data
         df_scored = pd.read_csv('data/processed/bansos_scored.csv')
-        
-        # Load recommendation data dengan delimiter yang tepat
-        try:
-            df_priority = pd.read_csv('data/processed/recommendation_report.csv', sep=';')
-        except:
-            try:
-                df_priority = pd.read_csv('data/processed/recommendation_report.csv')
-            except:
-                df_priority = df_scored.copy()
-                st.warning("⚠️ Menggunakan data scored sebagai fallback")
-        
+        try: df_priority = pd.read_csv('data/processed/recommendation_report.csv', sep=';')
+        except: 
+            try: df_priority = pd.read_csv('data/processed/recommendation_report.csv')
+            except: df_priority = df_scored.copy()
         return df_scored, df_priority
     except Exception as e:
         st.error(f"❌ Error loading data: {e}")
         return None, None
 
 df_scored, df_priority = load_data()
-
-if df_scored is None:
-    st.error("❌ Data tidak ditemukan. Pastikan file CSV ada di folder data/processed/")
-    st.info("💡 Jalankan semua script preprocessing dan modeling terlebih dahulu!")
-    st.stop()
+if df_scored is None: st.stop()
 
 # Helper function untuk mencari kolom
 def get_col(df, names):
-    """Mencari kolom dengan mencoba beberapa kemungkinan nama"""
     for name in names:
-        if name in df.columns:
-            return name
+        if name in df.columns: return name
     return None
 
 # Mapping kolom
 col_nama = get_col(df_priority, ['nama_kabupaten_kota', 'Nama Kabupaten/Kota', 'kabupaten', 'region'])
-col_score = get_col(df_priority, ['hybrid_risk_score', 'risk_score', 'score', 'Hybrid Risk Score'])
-col_category = get_col(df_priority, ['risk_category', 'kategori', 'Risk Category', 'Kategori'])
-col_signature = get_col(df_priority, ['signature_type', 'signature', 'Signature Type', 'Signature'])
-col_justification = get_col(df_priority, ['justification', 'justifikasi', 'Justification', 'Justifikasi'])
+col_score = get_col(df_priority, ['hybrid_risk_score', 'risk_score', 'score'])
+col_category = get_col(df_priority, ['risk_category', 'kategori', 'Risk Category'])
+col_signature = get_col(df_priority, ['signature_type', 'signature', 'Signature Type'])
+col_justification = get_col(df_priority, ['justification', 'justifikasi', 'Justification'])
 col_2024 = get_col(df_priority, ['2024'])
 col_2025 = get_col(df_priority, ['2025'])
-col_change = get_col(df_priority, ['change_pct', 'change_percentage', 'Change %'])
+col_change = get_col(df_priority, ['change_pct', 'change_percentage'])
+col_lat = get_col(df_priority, ['latitude', 'lat'])
+col_lon = get_col(df_priority, ['longitude', 'lon'])
 
-# Sidebar
-st.sidebar.header("⚙️ Filter")
-
-# Risk Category filter
+# Sidebar Filters
+st.sidebar.header("⚙️ Filter Global")
 if col_category:
     unique_cats = sorted(df_scored[col_category].dropna().unique().tolist())
-    filters_cat = st.sidebar.multiselect(
-        "Risk Category:", 
-        unique_cats,
-        default=unique_cats
-    )
-else:
-    filters_cat = []
+    filters_cat = st.sidebar.multiselect("Risk Category:", unique_cats, default=unique_cats)
+else: filters_cat = []
 
-# Signature Type filter
 if col_signature:
     unique_sigs = sorted(df_scored[col_signature].dropna().unique().tolist())
-    filters_sig = st.sidebar.multiselect(
-        "Signature Type:",
-        unique_sigs,
-        default=unique_sigs
-    )
-else:
-    filters_sig = []
+    filters_sig = st.sidebar.multiselect("Signature Type:", unique_sigs, default=unique_sigs)
+else: filters_sig = []
 
 # Apply filters
 df_filtered = df_scored.copy()
-if filters_cat and col_category:
-    df_filtered = df_filtered[df_filtered[col_category].isin(filters_cat)]
-if filters_sig and col_signature:
-    df_filtered = df_filtered[df_filtered[col_signature].isin(filters_sig)]
+if filters_cat and col_category: df_filtered = df_filtered[df_filtered[col_category].isin(filters_cat)]
+if filters_sig and col_signature: df_filtered = df_filtered[df_filtered[col_signature].isin(filters_sig)]
 
-# Metrics
+# Metrics Utama
 c1, c2, c3, c4 = st.columns(4)
-
-with c1:
-    st.metric("Total Wilayah", len(df_filtered))
-
-with c2:
-    if col_signature:
-        anomaly_count = (df_filtered[col_signature] != 'Normal').sum()
-    else:
-        anomaly_count = 0
+with c1: st.metric("Total Wilayah", len(df_filtered))
+with c2: 
+    anomaly_count = (df_filtered[col_signature] != 'Normal').sum() if col_signature else 0
     st.metric("Wilayah Anomali", int(anomaly_count))
-
-with c3:
-    if col_category:
-        high_risk = (df_filtered[col_category] == 'HIGH').sum()
-    else:
-        high_risk = 0
+with c3: 
+    high_risk = (df_filtered[col_category] == 'HIGH').sum() if col_category else 0
     st.metric("High Risk", int(high_risk))
-
-with c4:
-    if col_category:
-        medium_risk = (df_filtered[col_category] == 'MEDIUM').sum()
-    else:
-        medium_risk = 0
+with c4: 
+    medium_risk = (df_filtered[col_category] == 'MEDIUM').sum() if col_category else 0
     st.metric("Medium Risk", int(medium_risk))
 
 st.markdown("---")
 
-# TOP 10 Prioritas Audit
-st.subheader("🔴 TOP 10 Prioritas Audit")
+# ==============================================================================
+# 🔍 FITUR 1: PENCARIAN WILAYAH (Existing)
+# ==============================================================================
+st.subheader("🔍 Pencarian Status Wilayah")
+if col_nama:
+    search_query = st.text_input("Ketik nama Kabupaten/Kota:", placeholder="Contoh: KABUPATEN MALANG")
+    if search_query:
+        hasil_cari = df_scored[df_scored[col_nama].str.contains(search_query, case=False, na=False)]
+        if not hasil_cari.empty:
+            row_data = hasil_cari.iloc[0]
+            nama_wilayah = str(row_data[col_nama])
+            score = parse_number(row_data[col_score]) if col_score else 0.0
+            cat = str(row_data[col_category]) if col_category else "N/A"
+            sig = str(row_data[col_signature]) if col_signature else "N/A"
+            just = str(row_data[col_justification]) if col_justification else "Tidak ada justifikasi spesifik."
+            v2024 = int(parse_number(row_data[col_2024])) if col_2024 else 0
+            v2025 = int(parse_number(row_data[col_2025])) if col_2025 else 0
+            chg = parse_number(row_data[col_change]) if col_change else 0.0
+            
+            badge_color = "#ff4b4b" if cat == 'HIGH' else "#ffa421" if cat == 'MEDIUM' else "#00cc96"
+            icon = "🚨" if cat == 'HIGH' else "⚠️" if cat == 'MEDIUM' else "✅"
+            
+            st.markdown(f"""
+            <div class="search-result-card">
+                <h2 style="color:white; margin-bottom:0;">{icon} {nama_wilayah}</h2>
+                <h4 style="color:{badge_color}; margin-top:5px;">{'RISIKO TINGGI' if cat=='HIGH' else 'RISIKO SEDANG' if cat=='MEDIUM' else 'NORMAL'}</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            res_col1, res_col2 = st.columns([1, 1])
+            with res_col1:
+                st.info(f"**Score:** {score:.4f} | **Sig:** {sig}")
+                st.write(f"**Analisis:** {just}")
+            with res_col2:
+                m1, m2, m3 = st.columns(3)
+                m1.metric("2024", f"{v2024:,}")
+                m2.metric("2025", f"{v2025:,}")
+                m3.metric("Δ%", f"{chg:.1f}%")
+        else: st.warning("Wilayah tidak ditemukan.")
 
+st.markdown("---")
+
+# ==============================================================================
+# 🌟 FITUR 2: SIMULASI DAMPAK AUDIT (NEW - WOW EFFECT)
+# ==============================================================================
+st.subheader("💰 Simulasi Dampak Audit (Cost-Benefit Analysis)")
+st.caption("Estimasi penghematan anggaran jika audit difokuskan pada wilayah berisiko tinggi.")
+
+col_sim1, col_sim2 = st.columns(2)
+with col_sim1:
+    avg_fraud_amount = st.number_input("Estimasi Rata-rata Fraud per Wilayah (Rp)", min_value=1000000, value=50000000, step=1000000)
+with col_sim2:
+    cost_per_audit = st.number_input("Biaya Audit per Wilayah (Rp)", min_value=100000, value=5000000, step=100000)
+
+# Hitung simulasi
+high_risk_df = df_filtered[df_filtered[col_category] == 'HIGH'] if col_category else pd.DataFrame()
+num_high_risk = len(high_risk_df)
+total_potential_fraud = num_high_risk * avg_fraud_amount
+total_audit_cost = num_high_risk * cost_per_audit
+net_savings = total_potential_fraud - total_audit_cost
+
+sim_col1, sim_col2, sim_col3 = st.columns(3)
+sim_col1.metric("Potensi Kebocoran Terdeteksi", f"Rp {total_potential_fraud:,.0f}")
+sim_col2.metric("Biaya Audit Diperlukan", f"Rp {total_audit_cost:,.0f}")
+sim_col3.metric("Estimasi Penghematan Bersih", f"Rp {net_savings:,.0f}", delta=f"{num_high_risk} Wilayah High Risk")
+
+st.markdown("---")
+
+# ==============================================================================
+# 🌟 FITUR 3: PETA INTERAKTIF JAWA TIMUR (NEW - VISUAL WOW)
+# ==============================================================================
+st.subheader("🗺️ Peta Sebaran Risiko Jawa Timur")
+if col_lat and col_lon:
+    # Siapkan data untuk peta
+    map_data = df_filtered[[col_nama, col_lat, col_lon, col_score, col_category]].dropna()
+    
+    # Warna berdasarkan kategori
+    color_map = {'HIGH': '#ff4b4b', 'MEDIUM': '#ffa421', 'LOW': '#00cc96'}
+    map_data['color'] = map_data[col_category].map(color_map)
+    
+    fig_map = px.scatter_mapbox(
+        map_data,
+        lat=col_lat, lon=col_lon,
+        hover_name=col_nama,
+        hover_data=[col_category, col_score],
+        color_discrete_sequence=["#1f77b4"],
+        zoom=7,
+        height=500,
+        title="Sebaran Geografis Wilayah Berisiko"
+    )
+    
+    # Update marker agar lebih menarik
+    fig_map.update_traces(
+        marker=dict(size=12, opacity=0.8, symbol='circle', line=dict(width=2, color='white'))
+    )
+    
+    # Gunakan style peta gelap agar cocok dengan tema
+    fig_map.update_layout(mapbox_style="carto-darkmatter")
+    
+    st.plotly_chart(fig_map, use_container_width=True)
+else:
+    st.info("ℹ️ Data koordinat (Latitude/Longitude) tidak tersedia untuk menampilkan peta.")
+
+st.markdown("---")
+
+# ==============================================================================
+# TOP 10 PRIORITAS AUDIT (Existing)
+# ==============================================================================
+st.subheader("🔴 TOP 10 Prioritas Audit")
 if col_score:
     top10 = df_priority.nlargest(10, col_score)
-else:
-    top10 = df_priority.head(10)
+else: top10 = df_priority.head(10)
 
 for i, (_, row) in enumerate(top10.iterrows()):
-    # Extract data dengan parse_number untuk handle format angka
-    nama = str(row[col_nama]) if col_nama else f"Wilayah {i+1}"
-    nama = nama.split(';')[0].strip()
-    
+    nama = str(row[col_nama]).split(';')[0].strip() if col_nama else f"Wilayah {i+1}"
     score = parse_number(row[col_score]) if col_score else 0.0
     cat = str(row[col_category]) if col_category else "N/A"
     sig = str(row[col_signature]) if col_signature else "N/A"
-    just = str(row[col_justification]) if col_justification else "Tidak ada justifikasi"
-    
-    # Parse angka untuk 2024 dan 2025
+    just = str(row[col_justification]) if col_justification else "N/A"
     v2024 = int(parse_number(row[col_2024])) if col_2024 else 0
     v2025 = int(parse_number(row[col_2025])) if col_2025 else 0
     chg = parse_number(row[col_change]) if col_change else 0.0
     
-    # Badge
-    if cat == 'HIGH':
-        badge = "🚨 HIGH"
-    elif cat == 'MEDIUM':
-        badge = "⚠️ MEDIUM"
-    else:
-        badge = "✅ LOW"
+    badge = "🚨 HIGH" if cat == 'HIGH' else "⚠️ MEDIUM" if cat == 'MEDIUM' else "✅ LOW"
     
-    # Expander
     with st.expander(f"#{i+1} - {nama} | Score: {score:.2f} | {badge}"):
-        col_left, col_right = st.columns(2)
-        
-        with col_left:
-            st.markdown(f"**🔍 Signature:** {sig}")
-            st.info(f"**💡 Justifikasi:** {just}")
-            
-            if cat == 'HIGH':
-                st.error("🔴 Audit Sangat Disarankan")
-            elif cat == 'MEDIUM':
-                st.warning("🟡 Perlu Pemantauan")
-            else:
-                st.success("✅ Risiko Rendah")
-        
-        with col_right:
-            st.metric("Penerima 2024", f"{v2024:,}")
-            st.metric("Penerima 2025", f"{v2025:,}")
-            
-            # Delta untuk perubahan
-            if chg > 0:
-                delta_text = f"{chg:.1f}%"
-                st.metric("Perubahan (%)", delta_text, delta=f"+{chg:.1f}%")
-            else:
-                delta_text = f"{chg:.1f}%"
-                st.metric("Perubahan (%)", delta_text, delta=f"{chg:.1f}%")
-            
-            st.divider()
-            st.write(f"**Risk Score:** {score:.4f}")
-            
-            # Breakdown skor jika ada
-            if 'rule_score' in row.index:
-                rule_s = parse_number(row['rule_score'])
-                st.caption(f"Rule Score: {rule_s:.2f}")
-            if 'stat_score' in row.index:
-                stat_s = parse_number(row['stat_score'])
-                st.caption(f"Stat Score: {stat_s:.2f}")
+        c_left, c_right = st.columns(2)
+        with c_left:
+            st.write(f"**Signature:** {sig}")
+            st.info(f"**Justifikasi:** {just}")
+        with c_right:
+            st.metric("2024", f"{v2024:,}")
+            st.metric("2025", f"{v2025:,}")
+            st.metric("Δ%", f"{chg:.1f}%")
 
 st.markdown("---")
-
-# Visualizations
-st.subheader("📊 Visualisasi Data")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    if col_score:
-        fig_hist = px.histogram(
-            df_filtered, 
-            x=col_score,
-            nbins=20,
-            title="Distribusi Skor Risiko",
-            labels={col_score: 'Hybrid Risk Score', 'count': 'Frekuensi'},
-            color_discrete_sequence=['#1f77b4']
-        )
-        fig_hist.add_vline(x=0.6, line_dash="dash", line_color="red", 
-                          annotation_text="High Risk (0.6)")
-        fig_hist.add_vline(x=0.3, line_dash="dash", line_color="orange", 
-                          annotation_text="Medium Risk (0.3)")
-        st.plotly_chart(fig_hist, use_container_width=True)
-    else:
-        st.warning("⚠️ Kolom skor tidak ditemukan")
-
-with col2:
-    if col_signature:
-        sig_counts = df_filtered[col_signature].value_counts()
-        fig_pie = px.pie(
-            values=sig_counts.values,
-            names=sig_counts.index,
-            title="Distribusi Tipe Signature",
-            hole=0.3
-        )
-        st.plotly_chart(fig_pie, use_container_width=True)
-    else:
-        st.warning("⚠️ Kolom signature tidak ditemukan")
-
-# Scatter plot - PERBAIKAN DI SINI
-st.subheader("📈 Perbandingan 2024 vs 2025")
-
-if col_2024 and col_2025:
-    fig_scatter = px.scatter(
-        df_filtered,
-        x=col_2024,
-        y=col_2025,
-        color=col_score if col_score else None,
-        hover_data=[col_nama] if col_nama else [],
-        title="Perubahan Jumlah Penerima Bansos (Garis Merah = Tidak Ada Perubahan)",
-        labels={col_2024: 'Penerima 2024', col_2025: 'Penerima 2025'},
-        color_continuous_scale='RdYlGn_r' if col_score else None,
-        size='population' if 'population' in df_filtered.columns else None
-    )
-    
-    # Hitung max value untuk garis diagonal
-    max_2024 = parse_number(df_filtered[col_2024].max())
-    max_2025 = parse_number(df_filtered[col_2025].max())
-    max_val = max(max_2024, max_2025)
-    
-    # Tambahkan garis diagonal (TANPA annotation yang menyebabkan error)
-    fig_scatter.add_shape(
-        type="line",
-        x0=0, y0=0, x1=max_val, y1=max_val,
-        line=dict(color="red", dash="dash", width=2),
-    )
-    
-    # Tambahkan annotation dengan cara yang BENAR (terpisah dari add_shape)
-    fig_scatter.add_annotation(
-        x=max_val * 0.95,
-        y=max_val * 0.95,
-        text="Tidak Ada Perubahan",
-        showarrow=False,
-        font=dict(color="red", size=12),
-        xref="x",
-        yref="y"
-    )
-    
-    st.plotly_chart(fig_scatter, use_container_width=True)
-else:
-    st.warning("⚠️ Data tahun tidak tersedia")
-
-# Download section
-st.markdown("---")
-st.subheader("📥 Export Data")
-
-col_d1, col_d2, col_d3 = st.columns(3)
-
-with col_d1:
-    st.download_button(
-        label="📊 Download Scored Data",
-        data=df_scored.to_csv(index=False).encode('utf-8'),
-        file_name='bansos_scored_data.csv',
-        mime='text/csv'
-    )
-
-with col_d2:
-    st.download_button(
-        label="🎯 Download Priority List",
-        data=df_priority.to_csv(index=False).encode('utf-8'),
-        file_name='audit_priority_list.csv',
-        mime='text/csv'
-    )
-
-with col_d3:
-    st.download_button(
-        label="📋 Download Filtered Data",
-        data=df_filtered.to_csv(index=False).encode('utf-8'),
-        file_name='filtered_analysis.csv',
-        mime='text/csv'
-    )
 
 # Footer
-st.markdown("---")
 st.markdown("**Research Project | Data Science - Telkom University**")
-st.markdown("**Supervisors:** Bu Amalia Nur Alifah & Pak Ahmad Wali Satria Bahari Johan")
 st.markdown("**Student:** Athaya Alfarabi Asmino (1206230018)")
