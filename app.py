@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -22,8 +20,6 @@ st.markdown("""
     .stExpander { border: 1px solid #333; border-radius: 8px; margin-bottom: 10px; background-color: #1a1a1a; }
     .search-result-card { background-color: #262730; padding: 20px; border-radius: 10px; border-left: 5px solid #ff4b4b; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin-bottom: 20px; }
     .metric-container { background-color: #0e1117; padding: 15px; border-radius: 10px; border: 1px solid #333; }
-    /* Highlight for High Risk */
-    .high-risk-text { color: #ff4b4b; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -108,7 +104,7 @@ with c4:
 st.markdown("---")
 
 # ==============================================================================
-# 🔍 FITUR 1: PENCARIAN WILAYAH (Existing)
+# 🔍 FITUR 1: PENCARIAN WILAYAH
 # ==============================================================================
 st.subheader("🔍 Pencarian Status Wilayah")
 if col_nama:
@@ -150,7 +146,7 @@ if col_nama:
 st.markdown("---")
 
 # ==============================================================================
-# 🌟 FITUR 2: SIMULASI DAMPAK AUDIT (NEW - WOW EFFECT)
+# 🌟 FITUR 2: SIMULASI DAMPAK AUDIT
 # ==============================================================================
 st.subheader("💰 Simulasi Dampak Audit (Cost-Benefit Analysis)")
 st.caption("Estimasi penghematan anggaran jika audit difokuskan pada wilayah berisiko tinggi.")
@@ -176,44 +172,55 @@ sim_col3.metric("Estimasi Penghematan Bersih", f"Rp {net_savings:,.0f}", delta=f
 st.markdown("---")
 
 # ==============================================================================
-# 🌟 FITUR 3: PETA INTERAKTIF JAWA TIMUR (NEW - VISUAL WOW)
+# 🌟 FITUR 3: PETA INTERAKTIF JAWA TIMUR (DIPERBAIKI)
 # ==============================================================================
 st.subheader("🗺️ Peta Sebaran Risiko Jawa Timur")
 if col_lat and col_lon:
     # Siapkan data untuk peta
     map_data = df_filtered[[col_nama, col_lat, col_lon, col_score, col_category]].dropna()
     
-    # Warna berdasarkan kategori
-    color_map = {'HIGH': '#ff4b4b', 'MEDIUM': '#ffa421', 'LOW': '#00cc96'}
-    map_data['color'] = map_data[col_category].map(color_map)
-    
-    fig_map = px.scatter_mapbox(
-        map_data,
-        lat=col_lat, lon=col_lon,
-        hover_name=col_nama,
-        hover_data=[col_category, col_score],
-        color_discrete_sequence=["#1f77b4"],
-        zoom=7,
-        height=500,
-        title="Sebaran Geografis Wilayah Berisiko"
-    )
-    
-    # Update marker agar lebih menarik
-    fig_map.update_traces(
-        marker=dict(size=12, opacity=0.8, symbol='circle', line=dict(width=2, color='white'))
-    )
-    
-    # Gunakan style peta gelap agar cocok dengan tema
-    fig_map.update_layout(mapbox_style="carto-darkmatter")
-    
-    st.plotly_chart(fig_map, use_container_width=True)
+    if len(map_data) > 0:
+        # Warna berdasarkan kategori
+        color_map = {'HIGH': '#ff4b4b', 'MEDIUM': '#ffa421', 'LOW': '#00cc96'}
+        map_data['color'] = map_data[col_category].map(color_map)
+        
+        fig_map = px.scatter_mapbox(
+            map_data,
+            lat=col_lat, 
+            lon=col_lon,
+            hover_name=col_nama,
+            hover_data=[col_category, col_score],
+            color_discrete_sequence=["#1f77b4"],
+            zoom=7,
+            height=500,
+            title="Sebaran Geografis Wilayah Berisiko"
+        )
+        
+        # Update marker TANPA parameter symbol yang tidak valid
+        fig_map.update_traces(
+            marker=dict(
+                size=12, 
+                opacity=0.8, 
+                line=dict(width=2, color='white')
+            )
+        )
+        
+        # Gunakan style peta gelap agar cocok dengan tema
+        fig_map.update_layout(
+            mapbox_style="carto-darkmatter",
+            margin={"r":0,"t":0,"l":0,"b":0}
+        )
+        
+        st.plotly_chart(fig_map, use_container_width=True)
+    else:
+        st.info("ℹ️ Tidak ada data koordinat untuk ditampilkan di peta.")
 else:
     st.info("ℹ️ Data koordinat (Latitude/Longitude) tidak tersedia untuk menampilkan peta.")
 
 st.markdown("---")
 
 # ==============================================================================
-# TOP 10 PRIORITAS AUDIT (Existing)
+# TOP 10 PRIORITAS AUDIT
 # ==============================================================================
 st.subheader("🔴 TOP 10 Prioritas Audit")
 if col_score:
