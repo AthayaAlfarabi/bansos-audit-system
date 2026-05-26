@@ -68,8 +68,6 @@ col_justification = get_col(df_priority, ['justification', 'justifikasi', 'Justi
 col_2024 = get_col(df_priority, ['2024'])
 col_2025 = get_col(df_priority, ['2025'])
 col_change = get_col(df_priority, ['change_pct', 'change_percentage'])
-col_lat = get_col(df_priority, ['latitude', 'lat'])
-col_lon = get_col(df_priority, ['longitude', 'lon'])
 
 # Sidebar Filters
 st.sidebar.header("⚙️ Filter Global")
@@ -172,50 +170,28 @@ sim_col3.metric("Estimasi Penghematan Bersih", f"Rp {net_savings:,.0f}", delta=f
 st.markdown("---")
 
 # ==============================================================================
-# 🌟 FITUR 3: PETA INTERAKTIF JAWA TIMUR (DIPERBAIKI)
+# VISUALISASI DATA (Histogram & Pie Chart)
 # ==============================================================================
-st.subheader("🗺️ Peta Sebaran Risiko Jawa Timur")
-if col_lat and col_lon:
-    # Siapkan data untuk peta
-    map_data = df_filtered[[col_nama, col_lat, col_lon, col_score, col_category]].dropna()
-    
-    if len(map_data) > 0:
-        # Warna berdasarkan kategori
-        color_map = {'HIGH': '#ff4b4b', 'MEDIUM': '#ffa421', 'LOW': '#00cc96'}
-        map_data['color'] = map_data[col_category].map(color_map)
-        
-        fig_map = px.scatter_mapbox(
-            map_data,
-            lat=col_lat, 
-            lon=col_lon,
-            hover_name=col_nama,
-            hover_data=[col_category, col_score],
-            color_discrete_sequence=["#1f77b4"],
-            zoom=7,
-            height=500,
-            title="Sebaran Geografis Wilayah Berisiko"
-        )
-        
-        # Update marker TANPA parameter symbol yang tidak valid
-        fig_map.update_traces(
-            marker=dict(
-                size=12, 
-                opacity=0.8, 
-                line=dict(width=2, color='white')
-            )
-        )
-        
-        # Gunakan style peta gelap agar cocok dengan tema
-        fig_map.update_layout(
-            mapbox_style="carto-darkmatter",
-            margin={"r":0,"t":0,"l":0,"b":0}
-        )
-        
-        st.plotly_chart(fig_map, use_container_width=True)
-    else:
-        st.info("ℹ️ Tidak ada data koordinat untuk ditampilkan di peta.")
-else:
-    st.info("ℹ️ Data koordinat (Latitude/Longitude) tidak tersedia untuk menampilkan peta.")
+st.subheader("📊 Visualisasi Data")
+col1, col2 = st.columns(2)
+with col1:
+    if col_score:
+        fig_hist = px.histogram(df_filtered, x=col_score, nbins=20, title="Distribusi Skor Risiko", color_discrete_sequence=['#1f77b4'])
+        fig_hist.add_vline(x=0.6, line_dash="dash", line_color="red")
+        st.plotly_chart(fig_hist, use_container_width=True)
+with col2:
+    if col_signature:
+        sig_counts = df_filtered[col_signature].value_counts()
+        fig_pie = px.pie(values=sig_counts.values, names=sig_counts.index, title="Distribusi Tipe Signature", hole=0.3)
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+# Scatter Plot
+st.subheader("📈 Perbandingan 2024 vs 2025")
+if col_2024 and col_2025:
+    fig_scatter = px.scatter(df_filtered, x=col_2024, y=col_2025, color=col_score, hover_data=[col_nama], title="Perubahan Jumlah Penerima Bansos", labels={col_2024: 'Penerima 2024', col_2025: 'Penerima 2025'}, color_continuous_scale='RdYlGn_r')
+    max_val = max(parse_number(df_filtered[col_2024].max()), parse_number(df_filtered[col_2025].max()))
+    fig_scatter.add_shape(type="line", x0=0, y0=0, x1=max_val, y1=max_val, line=dict(color="red", dash="dash"))
+    st.plotly_chart(fig_scatter, use_container_width=True)
 
 st.markdown("---")
 
