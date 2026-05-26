@@ -35,6 +35,14 @@ def parse_number(value):
         try: return float(str(value).replace('.', '').replace(',', '.'))
         except: return 0.0
 
+# Helper function untuk format persentase yang rapi
+def format_percentage(value):
+    if pd.isna(value): return "0.0%"
+    val = float(value)
+    if val > 1000: return "> +1000%"
+    if val < -1000: return "< -1000%"
+    return f"{val:.1f}%"
+
 # Load data
 @st.cache_data
 def load_data():
@@ -103,44 +111,64 @@ with c4:
 st.markdown("---")
 
 # ==============================================================================
-# 🔍 FITUR 1: PENCARIAN WILAYAH
+# 🔍 FITUR 1: PENCARIAN WILAYAH (DENGAN INPUT KEY UNTUK INTERAKSI PETA)
 # ==============================================================================
 st.subheader("🔍 Pencarian Status Wilayah")
-if col_nama:
-    search_query = st.text_input("Ketik nama Kabupaten/Kota:", placeholder="Contoh: KABUPATEN MALANG")
-    if search_query:
-        hasil_cari = df_scored[df_scored[col_nama].str.contains(search_query, case=False, na=False)]
-        if not hasil_cari.empty:
-            row_data = hasil_cari.iloc[0]
-            nama_wilayah = str(row_data[col_nama])
-            score = parse_number(row_data[col_score]) if col_score else 0.0
-            cat = str(row_data[col_category]) if col_category else "N/A"
-            sig = str(row_data[col_signature]) if col_signature else "N/A"
-            just = str(row_data[col_justification]) if col_justification else "Tidak ada justifikasi spesifik."
-            v2024 = int(parse_number(row_data[col_2024])) if col_2024 else 0
-            v2025 = int(parse_number(row_data[col_2025])) if col_2025 else 0
-            chg = parse_number(row_data[col_change]) if col_change else 0.0
+
+# Gunakan session state untuk menyimpan query pencarian dari peta
+if 'search_query_from_map' not in st.session_state:
+    st.session_state.search_query_from_map = ""
+
+# Input pencarian manual
+search_query = st.text_input(
+    "Ketik nama Kabupaten/Kota:", 
+    value=st.session_state.search_query_from_map,
+    placeholder="Contoh: KABUPATEN MALANG",
+    key="manual_search"
+)
+
+# Update session state jika user mengetik manual
+if search_query != st.session_state.search_query_from_map:
+    st.session_state.search_query_from_map = search_query
+
+if col_nama and search_query:
+    hasil_cari = df_scored[df_scored[col_nama].str.contains(search_query, case=False, na=False)]
+    if not hasil_cari.empty:
+        row_data = hasil_cari.iloc[0]
+        nama_wilayah = str(row_data[col_nama])
+        score = parse_number(row_data[col_score]) if col_score else 0.0
+        cat = str(row_data[col_category]) if col_category else "N/A"
+        sig = str(row_data[col_signature]) if col_signature else "N/A"
+        just = str(row_data[col_justification]) if col_justification else "Tidak ada justifikasi spesifik."
+        
+        v2024 = int(parse_number(row_data[col_2024])) if col_2024 else 0
+        v2025 = int(parse_number(row_data[col_2025])) if col_2025 else 0
+        chg_raw = parse_number(row_data[col_change]) if col_change else 0.0
+        
+        # Format perubahan persen agar rapi
+        chg_formatted = format_percentage(chg_raw)
             
-            badge_color = "#ff4b4b" if cat == 'HIGH' else "#ffa421" if cat == 'MEDIUM' else "#00cc96"
-            icon = "🚨" if cat == 'HIGH' else "⚠️" if cat == 'MEDIUM' else "✅"
-            
-            st.markdown(f"""
-            <div class="search-result-card">
-                <h2 style="color:white; margin-bottom:0;">{icon} {nama_wilayah}</h2>
-                <h4 style="color:{badge_color}; margin-top:5px;">{'RISIKO TINGGI' if cat=='HIGH' else 'RISIKO SEDANG' if cat=='MEDIUM' else 'NORMAL'}</h4>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            res_col1, res_col2 = st.columns([1, 1])
-            with res_col1:
-                st.info(f"**Score:** {score:.4f} | **Sig:** {sig}")
-                st.write(f"**Analisis:** {just}")
-            with res_col2:
-                m1, m2, m3 = st.columns(3)
-                m1.metric("2024", f"{v2024:,}")
-                m2.metric("2025", f"{v2025:,}")
-                m3.metric("Δ%", f"{chg:.1f}%")
-        else: st.warning("Wilayah tidak ditemukan.")
+        badge_color = "#ff4b4b" if cat == 'HIGH' else "#ffa421" if cat == 'MEDIUM' else "#00cc96"
+        icon = "🚨" if cat == 'HIGH' else "⚠️" if cat == 'MEDIUM' else "✅"
+        
+        st.markdown(f"""
+        <div class="search-result-card">
+            <h2 style="color:white; margin-bottom:0;">{icon} {nama_wilayah}</h2>
+            <h4 style="color:{badge_color}; margin-top:5px;">{'RISIKO TINGGI' if cat=='HIGH' else 'RISIKO SEDANG' if cat=='MEDIUM' else 'NORMAL'}</h4>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        res_col1, res_col2 = st.columns([1, 1])
+        with res_col1:
+            st.info(f"**Score:** {score:.4f} | **Sig:** {sig}")
+            st.write(f"**Analisis:** {just}")
+        with res_col2:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("2024", f"{v2024:,}")
+            m2.metric("2025", f"{v2025:,}")
+            m3.metric("Δ%", chg_formatted)
+    else: 
+        st.warning("Wilayah tidak ditemukan.")
 
 st.markdown("---")
 
@@ -156,7 +184,6 @@ with col_sim1:
 with col_sim2:
     cost_per_audit = st.number_input("Biaya Audit per Wilayah (Rp)", min_value=100000, value=5000000, step=100000)
 
-# Hitung simulasi
 high_risk_df = df_filtered[df_filtered[col_category] == 'HIGH'] if col_category else pd.DataFrame()
 num_high_risk = len(high_risk_df)
 total_potential_fraud = num_high_risk * avg_fraud_amount
@@ -171,14 +198,15 @@ sim_col3.metric("Estimasi Penghematan Bersih", f"Rp {net_savings:,.0f}", delta=f
 st.markdown("---")
 
 # ==============================================================================
-# 🌟 FITUR 3: PETA INTERAKTIF JAWA TIMUR (DIPERBAIKI - TANPA TOKEN)
+# 🌟 FITUR 3: PETA INTERAKTIF JAWA TIMUR (CLICK TO VIEW)
 # ==============================================================================
 st.subheader("🗺️ Peta Sebaran Risiko Jawa Timur")
+st.caption("Klik titik pada peta untuk melihat detail status wilayah tersebut.")
+
 if col_lat and col_lon:
     map_data = df_filtered[[col_nama, col_lat, col_lon, col_score, col_category]].dropna()
     
     if len(map_data) > 0:
-        # Buat peta dasar
         fig_map = px.scatter_mapbox(
             map_data,
             lat=col_lat, 
@@ -189,18 +217,23 @@ if col_lat and col_lon:
             height=500
         )
         
-        # Update marker dengan konfigurasi sederhana yang kompatibel
-        fig_map.update_traces(
-            marker=dict(size=10, opacity=0.7)
-        )
+        fig_map.update_traces(marker=dict(size=10, opacity=0.7))
+        fig_map.update_layout(mapbox_style="open-street-map", margin={"r":0,"t":0,"l":0,"b":0})
         
-        # Gunakan style open-street-map (gratis, tidak perlu token)
-        fig_map.update_layout(
-            mapbox_style="open-street-map",
-            margin={"r":0,"t":0,"l":0,"b":0}
-        )
+        # Render peta dan tangkap event klik
+        map_event = st.plotly_chart(fig_map, use_container_width=True, on_select="rerun")
         
-        st.plotly_chart(fig_map, use_container_width=True)
+        # Logika interaksi: Jika ada titik yang diklik
+        if map_event.selection.points:
+            clicked_point = map_event.selection.points[0]
+            # Ambil nama wilayah dari hover_name (biasanya ada di customdata atau hovertext)
+            # Plotly scatter_mapbox menyimpan nama di 'hovertext' jika hover_name diisi
+            clicked_name = clicked_point.get('hovertext', '')
+            
+            if clicked_name:
+                # Update session state agar kotak pencarian terisi otomatis
+                st.session_state.search_query_from_map = clicked_name
+                st.rerun() # Refresh halaman untuk menampilkan hasil pencarian
     else:
         st.info("ℹ️ Tidak ada data koordinat untuk ditampilkan di peta.")
 else:
@@ -248,9 +281,13 @@ for i, (_, row) in enumerate(top10.iterrows()):
     cat = str(row[col_category]) if col_category else "N/A"
     sig = str(row[col_signature]) if col_signature else "N/A"
     just = str(row[col_justification]) if col_justification else "N/A"
+    
     v2024 = int(parse_number(row[col_2024])) if col_2024 else 0
     v2025 = int(parse_number(row[col_2025])) if col_2025 else 0
-    chg = parse_number(row[col_change]) if col_change else 0.0
+    chg_raw = parse_number(row[col_change]) if col_change else 0.0
+    
+    # Gunakan format persen yang rapi
+    chg_formatted = format_percentage(chg_raw)
     
     badge = "🚨 HIGH" if cat == 'HIGH' else "⚠️ MEDIUM" if cat == 'MEDIUM' else "✅ LOW"
     
@@ -262,7 +299,7 @@ for i, (_, row) in enumerate(top10.iterrows()):
         with c_right:
             st.metric("2024", f"{v2024:,}")
             st.metric("2025", f"{v2025:,}")
-            st.metric("Δ%", f"{chg:.1f}%")
+            st.metric("Δ%", chg_formatted)
 
 st.markdown("---")
 
