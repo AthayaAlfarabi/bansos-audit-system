@@ -59,7 +59,7 @@ def load_data():
         st.error(f"❌ Error loading data: {e}")
         return None, None
 
-# Load GeoJSON dengan nama file spesifik
+# Load GeoJSON Khusus Jawa Timur (Level Kabupaten/Kota)
 @st.cache_data
 def load_geojson():
     # Nama file sesuai permintaan: Jawa Timur.geojson
@@ -69,17 +69,15 @@ def load_geojson():
         with open(geojson_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     else:
-        # Coba alternatif tanpa spasi jika user salah save
-        alt_path = 'JawaTimur.geojson'
-        if os.path.exists(alt_path):
-            with open(alt_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+        st.error(f"❌ File '{geojson_path}' tidak ditemukan di folder root!")
+        st.info("💡 Pastikan file GeoJSON level Kabupaten/Kota sudah di-save dengan nama yang tepat.")
         return None
 
 df_scored, df_priority = load_data()
 geojson_jatim = load_geojson()
 
-if df_scored is None: st.stop()
+if df_scored is None or geojson_jatim is None: 
+    st.stop()
 
 # Helper function untuk mencari kolom
 def get_col(df, names):
@@ -88,6 +86,8 @@ def get_col(df, names):
     return None
 
 # Mapping kolom CSV
+# PENTING: Pastikan isi kolom 'nama_kabupaten_kota' di CSV SAMA PERSIS dengan "NAME_2" di GeoJSON
+# Contoh: Jika di GeoJSON "KABUPATEN MALANG", di CSV harus "KABUPATEN MALANG" (bukan "Kab. Malang")
 col_nama = get_col(df_priority, ['nama_kabupaten_kota', 'Nama Kabupaten/Kota', 'kabupaten', 'region'])
 col_score = get_col(df_priority, ['hybrid_risk_score', 'risk_score', 'score'])
 col_category = get_col(df_priority, ['risk_category', 'kategori', 'Risk Category'])
@@ -202,7 +202,7 @@ st.markdown("---")
 st.subheader("🗺️ Peta Sebaran Risiko Jawa Timur")
 st.caption("Merah = High Risk, Kuning = Medium Risk, Hijau = Low Risk")
 
-if geojson_jatim and col_nama and col_category:
+if col_nama and col_category:
     # Siapkan data untuk choropleth
     map_data = df_filtered[[col_nama, col_category]].copy()
     
@@ -210,28 +210,16 @@ if geojson_jatim and col_nama and col_category:
     color_map_num = {'LOW': 0, 'MEDIUM': 1, 'HIGH': 2}
     map_data['color_val'] = map_data[col_category].map(color_map_num)
     
-    # Deteksi otomatis properti nama di GeoJSON
-    # Kita cek fitur pertama untuk melihat kunci apa yang menyimpan nama wilayah
-    feature_id_key = "properties.name" # Default
-    if 'features' in geojson_jatim and len(geojson_jatim['features']) > 0:
-        props = geojson_jatim['features'][0]['properties']
-        # Cari kunci yang mirip dengan nama
-        possible_keys = ['name', 'NAME_2', 'KABKOTA', 'Kabupaten_Kota', 'Nama']
-        for key in possible_keys:
-            if key in props:
-                feature_id_key = f"properties.{key}"
-                break
-    
     try:
         fig_map = px.choropleth_mapbox(
             map_data,
             geojson=geojson_jatim,
-            locations=col_nama,       # Kolom nama di DataFrame
-            featureidkey=feature_id_key, # Properti nama di GeoJSON (otomatis terdeteksi)
+            locations=col_nama,       # Kolom nama di DataFrame CSV kamu
+            featureidkey="properties.NAME_2", # KUNCI: Sesuai dengan isi file GeoJSON kamu
             color='color_val',
             color_continuous_scale=["#00cc96", "#ffa421", "#ff4b4b"], # Hijau -> Kuning -> Merah
             range_color=(0, 2),
-            mapbox_style="carto-positron",
+            mapbox_style="carto-positron", # Style peta terang agar warna terlihat jelas
             zoom=7,
             center={"lat": -7.5, "lon": 112.5},
             opacity=0.7,
@@ -242,10 +230,8 @@ if geojson_jatim and col_nama and col_category:
         st.plotly_chart(fig_map, use_container_width=True)
         
     except Exception as e:
-        st.error(f"⚠️ Gagal menampilkan peta. Pastikan nama kolom '{col_nama}' di CSV cocok dengan properti '{feature_id_key}' di GeoJSON. Error: {e}")
-
-elif not geojson_jatim:
-    st.warning("⚠️ File `Jawa Timur.geojson` tidak ditemukan di folder root. Peta tidak dapat ditampilkan.")
+        st.error(f"⚠️ Gagal menampilkan peta. Pastikan nama di CSV cocok dengan 'NAME_2' di GeoJSON. Error: {e}")
+        st.info("💡 Tips: Buka file GeoJSON di text editor, lihat 'properties' di fitur pertama, dan pastikan namanya sama dengan di CSV.")
 else:
     st.info("ℹ️ Data tidak lengkap untuk menampilkan peta.")
 
