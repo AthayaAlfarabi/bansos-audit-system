@@ -203,25 +203,10 @@ st.subheader("🗺️ Peta Sebaran Risiko Jawa Timur")
 st.caption("Merah = High Risk, Kuning = Medium Risk, Hijau = Low Risk")
 
 if col_nama and col_category:
-    # 1. Siapkan data untuk choropleth
+    # Siapkan data untuk choropleth
     map_data = df_filtered[[col_nama, col_category]].copy()
     
-    # 2. STANDARISASI NAMA AGAR COCOK DENGAN GEOJSON
-    # GeoJSON menggunakan format seperti "Kota Malang", "Kabupaten Banyuwangi"
-    # Kita bersihkan nama di CSV agar mirip
-    
-    def clean_name(name):
-        if pd.isna(name): return ""
-        name = str(name).upper().strip()
-        # Ganti singkatan umum agar cocok dengan GeoJSON jika perlu
-        # Sesuaikan ini jika nama di GeoJSON kamu berbeda
-        if name.startswith('KAB. '): name = name.replace('KAB. ', 'KABUPATEN ')
-        if name.startswith('KOTA '): name = name # Biarkan KOTA
-        return name
-
-    map_data['clean_name'] = map_data[col_nama].apply(clean_name)
-    
-    # 3. Buat kolom warna numerik
+    # Buat kolom warna numerik untuk choropleth (0: Low, 1: Medium, 2: High)
     color_map_num = {'LOW': 0, 'MEDIUM': 1, 'HIGH': 2}
     map_data['color_val'] = map_data[col_category].map(color_map_num)
     
@@ -229,12 +214,12 @@ if col_nama and col_category:
         fig_map = px.choropleth_mapbox(
             map_data,
             geojson=geojson_jatim,
-            locations='clean_name',       # Gunakan kolom yang sudah dibersihkan
-            featureidkey="properties.NAME_2", # Kunci properti di GeoJSON
+            locations=col_nama,       # Kolom nama di DataFrame CSV kamu
+            featureidkey="properties.NAME_2", # KUNCI: Sesuai dengan isi file GeoJSON kamu
             color='color_val',
-            color_continuous_scale=["#00cc96", "#ffa421", "#ff4b4b"], 
+            color_continuous_scale=["#00cc96", "#ffa421", "#ff4b4b"], # Hijau -> Kuning -> Merah
             range_color=(0, 2),
-            mapbox_style="carto-positron",
+            mapbox_style="carto-positron", # Style peta terang agar warna terlihat jelas
             zoom=7,
             center={"lat": -7.5, "lon": 112.5},
             opacity=0.7,
@@ -246,9 +231,11 @@ if col_nama and col_category:
         
     except Exception as e:
         st.error(f"⚠️ Gagal menampilkan peta. Pastikan nama di CSV cocok dengan 'NAME_2' di GeoJSON. Error: {e}")
-        st.info("💡 Tips: Cek isi kolom 'nama_kabupaten_kota' di CSV Anda. Harus sama persis dengan 'NAME_2' di GeoJSON (misal: 'Kota Malang').")
+        st.info("💡 Tips: Buka file GeoJSON di text editor, lihat 'properties' di fitur pertama, dan pastikan namanya sama dengan di CSV.")
 else:
     st.info("ℹ️ Data tidak lengkap untuk menampilkan peta.")
+
+st.markdown("---")
 
 # ==============================================================================
 # VISUALISASI DATA LAINNYA
