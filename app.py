@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import json
+import os
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -43,7 +45,7 @@ def format_percentage(value):
     if val < -1000: return "< -1000%"
     return f"{val:.1f}%"
 
-# Load data
+# Load data CSV
 @st.cache_data
 def load_data():
     try:
@@ -57,7 +59,26 @@ def load_data():
         st.error(f"❌ Error loading data: {e}")
         return None, None
 
+# Load GeoJSON dengan nama file spesifik
+@st.cache_data
+def load_geojson():
+    # Nama file sesuai permintaan: Jawa Timur.geojson
+    geojson_path = 'Jawa Timur.geojson'
+    
+    if os.path.exists(geojson_path):
+        with open(geojson_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    else:
+        # Coba alternatif tanpa spasi jika user salah save
+        alt_path = 'JawaTimur.geojson'
+        if os.path.exists(alt_path):
+            with open(alt_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return None
+
 df_scored, df_priority = load_data()
+geojson_jatim = load_geojson()
+
 if df_scored is None: st.stop()
 
 # Helper function untuk mencari kolom
@@ -66,7 +87,7 @@ def get_col(df, names):
         if name in df.columns: return name
     return None
 
-# Mapping kolom
+# Mapping kolom CSV
 col_nama = get_col(df_priority, ['nama_kabupaten_kota', 'Nama Kabupaten/Kota', 'kabupaten', 'region'])
 col_score = get_col(df_priority, ['hybrid_risk_score', 'risk_score', 'score'])
 col_category = get_col(df_priority, ['risk_category', 'kategori', 'Risk Category'])
@@ -75,8 +96,6 @@ col_justification = get_col(df_priority, ['justification', 'justifikasi', 'Justi
 col_2024 = get_col(df_priority, ['2024'])
 col_2025 = get_col(df_priority, ['2025'])
 col_change = get_col(df_priority, ['change_pct', 'change_percentage'])
-col_lat = get_col(df_priority, ['latitude', 'lat'])
-col_lon = get_col(df_priority, ['longitude', 'lon'])
 
 # Sidebar Filters
 st.sidebar.header("⚙️ Filter Global")
@@ -111,25 +130,10 @@ with c4:
 st.markdown("---")
 
 # ==============================================================================
-# 🔍 FITUR 1: PENCARIAN WILAYAH (DENGAN INPUT KEY UNTUK INTERAKSI PETA)
+# 🔍 FITUR 1: PENCARIAN WILAYAH
 # ==============================================================================
 st.subheader("🔍 Pencarian Status Wilayah")
-
-# Gunakan session state untuk menyimpan query pencarian dari peta
-if 'search_query_from_map' not in st.session_state:
-    st.session_state.search_query_from_map = ""
-
-# Input pencarian manual
-search_query = st.text_input(
-    "Ketik nama Kabupaten/Kota:", 
-    value=st.session_state.search_query_from_map,
-    placeholder="Contoh: KABUPATEN MALANG",
-    key="manual_search"
-)
-
-# Update session state jika user mengetik manual
-if search_query != st.session_state.search_query_from_map:
-    st.session_state.search_query_from_map = search_query
+search_query = st.text_input("Ketik nama Kabupaten/Kota:", placeholder="Contoh: KABUPATEN MALANG", key="manual_search")
 
 if col_nama and search_query:
     hasil_cari = df_scored[df_scored[col_nama].str.contains(search_query, case=False, na=False)]
@@ -144,8 +148,6 @@ if col_nama and search_query:
         v2024 = int(parse_number(row_data[col_2024])) if col_2024 else 0
         v2025 = int(parse_number(row_data[col_2025])) if col_2025 else 0
         chg_raw = parse_number(row_data[col_change]) if col_change else 0.0
-        
-        # Format perubahan persen agar rapi
         chg_formatted = format_percentage(chg_raw)
             
         badge_color = "#ff4b4b" if cat == 'HIGH' else "#ffa421" if cat == 'MEDIUM' else "#00cc96"
@@ -167,8 +169,7 @@ if col_nama and search_query:
             m1.metric("2024", f"{v2024:,}")
             m2.metric("2025", f"{v2025:,}")
             m3.metric("Δ%", chg_formatted)
-    else: 
-        st.warning("Wilayah tidak ditemukan.")
+    else: st.warning("Wilayah tidak ditemukan.")
 
 st.markdown("---")
 
@@ -176,8 +177,6 @@ st.markdown("---")
 # 🌟 FITUR 2: SIMULASI DAMPAK AUDIT
 # ==============================================================================
 st.subheader("💰 Simulasi Dampak Audit (Cost-Benefit Analysis)")
-st.caption("Estimasi penghematan anggaran jika audit difokuskan pada wilayah berisiko tinggi.")
-
 col_sim1, col_sim2 = st.columns(2)
 with col_sim1:
     avg_fraud_amount = st.number_input("Estimasi Rata-rata Fraud per Wilayah (Rp)", min_value=1000000, value=50000000, step=1000000)
@@ -198,51 +197,62 @@ sim_col3.metric("Estimasi Penghematan Bersih", f"Rp {net_savings:,.0f}", delta=f
 st.markdown("---")
 
 # ==============================================================================
-# 🌟 FITUR 3: PETA INTERAKTIF JAWA TIMUR (CLICK TO VIEW)
+# 🌟 FITUR 3: PETA CHOROPLETH JAWA TIMUR (HIGHLIGHT WILAYAH)
 # ==============================================================================
 st.subheader("🗺️ Peta Sebaran Risiko Jawa Timur")
-st.caption("Klik titik pada peta untuk melihat detail status wilayah tersebut.")
+st.caption("Merah = High Risk, Kuning = Medium Risk, Hijau = Low Risk")
 
-if col_lat and col_lon:
-    map_data = df_filtered[[col_nama, col_lat, col_lon, col_score, col_category]].dropna()
+if geojson_jatim and col_nama and col_category:
+    # Siapkan data untuk choropleth
+    map_data = df_filtered[[col_nama, col_category]].copy()
     
-    if len(map_data) > 0:
-        fig_map = px.scatter_mapbox(
+    # Buat kolom warna numerik untuk choropleth (0: Low, 1: Medium, 2: High)
+    color_map_num = {'LOW': 0, 'MEDIUM': 1, 'HIGH': 2}
+    map_data['color_val'] = map_data[col_category].map(color_map_num)
+    
+    # Deteksi otomatis properti nama di GeoJSON
+    # Kita cek fitur pertama untuk melihat kunci apa yang menyimpan nama wilayah
+    feature_id_key = "properties.name" # Default
+    if 'features' in geojson_jatim and len(geojson_jatim['features']) > 0:
+        props = geojson_jatim['features'][0]['properties']
+        # Cari kunci yang mirip dengan nama
+        possible_keys = ['name', 'NAME_2', 'KABKOTA', 'Kabupaten_Kota', 'Nama']
+        for key in possible_keys:
+            if key in props:
+                feature_id_key = f"properties.{key}"
+                break
+    
+    try:
+        fig_map = px.choropleth_mapbox(
             map_data,
-            lat=col_lat, 
-            lon=col_lon,
-            hover_name=col_nama,
-            hover_data=[col_category, col_score],
+            geojson=geojson_jatim,
+            locations=col_nama,       # Kolom nama di DataFrame
+            featureidkey=feature_id_key, # Properti nama di GeoJSON (otomatis terdeteksi)
+            color='color_val',
+            color_continuous_scale=["#00cc96", "#ffa421", "#ff4b4b"], # Hijau -> Kuning -> Merah
+            range_color=(0, 2),
+            mapbox_style="carto-positron",
             zoom=7,
-            height=500
+            center={"lat": -7.5, "lon": 112.5},
+            opacity=0.7,
+            labels={'color_val':'Risk Level'}
         )
         
-        fig_map.update_traces(marker=dict(size=10, opacity=0.7))
-        fig_map.update_layout(mapbox_style="open-street-map", margin={"r":0,"t":0,"l":0,"b":0})
+        fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+        st.plotly_chart(fig_map, use_container_width=True)
         
-        # Render peta dan tangkap event klik
-        map_event = st.plotly_chart(fig_map, use_container_width=True, on_select="rerun")
-        
-        # Logika interaksi: Jika ada titik yang diklik
-        if map_event.selection.points:
-            clicked_point = map_event.selection.points[0]
-            # Ambil nama wilayah dari hover_name (biasanya ada di customdata atau hovertext)
-            # Plotly scatter_mapbox menyimpan nama di 'hovertext' jika hover_name diisi
-            clicked_name = clicked_point.get('hovertext', '')
-            
-            if clicked_name:
-                # Update session state agar kotak pencarian terisi otomatis
-                st.session_state.search_query_from_map = clicked_name
-                st.rerun() # Refresh halaman untuk menampilkan hasil pencarian
-    else:
-        st.info("ℹ️ Tidak ada data koordinat untuk ditampilkan di peta.")
+    except Exception as e:
+        st.error(f"⚠️ Gagal menampilkan peta. Pastikan nama kolom '{col_nama}' di CSV cocok dengan properti '{feature_id_key}' di GeoJSON. Error: {e}")
+
+elif not geojson_jatim:
+    st.warning("⚠️ File `Jawa Timur.geojson` tidak ditemukan di folder root. Peta tidak dapat ditampilkan.")
 else:
-    st.info("ℹ️ Data koordinat (Latitude/Longitude) tidak tersedia.")
+    st.info("ℹ️ Data tidak lengkap untuk menampilkan peta.")
 
 st.markdown("---")
 
 # ==============================================================================
-# VISUALISASI DATA (Histogram & Pie Chart)
+# VISUALISASI DATA LAINNYA
 # ==============================================================================
 st.subheader("📊 Visualisasi Data")
 col1, col2 = st.columns(2)
@@ -285,8 +295,6 @@ for i, (_, row) in enumerate(top10.iterrows()):
     v2024 = int(parse_number(row[col_2024])) if col_2024 else 0
     v2025 = int(parse_number(row[col_2025])) if col_2025 else 0
     chg_raw = parse_number(row[col_change]) if col_change else 0.0
-    
-    # Gunakan format persen yang rapi
     chg_formatted = format_percentage(chg_raw)
     
     badge = "🚨 HIGH" if cat == 'HIGH' else "⚠️ MEDIUM" if cat == 'MEDIUM' else "✅ LOW"
@@ -302,7 +310,5 @@ for i, (_, row) in enumerate(top10.iterrows()):
             st.metric("Δ%", chg_formatted)
 
 st.markdown("---")
-
-# Footer
 st.markdown("**Research Project | Data Science - Telkom University**")
 st.markdown("**Student:** Athaya Alfarabi Asmino (1206230018)")
