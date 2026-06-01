@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 import json
 import os
+import re
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -29,7 +30,10 @@ st.title("🎯 Sistem Rekomendasi Prioritas Audit Penyaluran Bantuan Sosial")
 st.markdown("**Jawa Timur 2024-2025** | Hybrid Machine Learning & Signature Analysis")
 st.markdown("---")
 
-# Helper function untuk parse angka
+# ==============================================================================
+# HELPER FUNCTIONS (DIDEFINISIKAN DI AWAL AGAR BISA DIPANGGIL DI MANA SAJA)
+# ==============================================================================
+
 def parse_number(value):
     if pd.isna(value) or value == '' or value is None: return 0.0
     try: return float(value)
@@ -37,7 +41,6 @@ def parse_number(value):
         try: return float(str(value).replace('.', '').replace(',', '.'))
         except: return 0.0
 
-# Helper function untuk format persentase yang rapi
 def format_percentage(value):
     if pd.isna(value): return "0.0%"
     val = float(value)
@@ -45,7 +48,15 @@ def format_percentage(value):
     if val < -1000: return "< -1000%"
     return f"{val:.1f}%"
 
-# Load data CSV
+def get_col(df, names):
+    for name in names:
+        if name in df.columns: return name
+    return None
+
+# ==============================================================================
+# LOAD DATA
+# ==============================================================================
+
 @st.cache_data
 def load_data():
     try:
@@ -59,18 +70,14 @@ def load_data():
         st.error(f"❌ Error loading data: {e}")
         return None, None
 
-# Load GeoJSON Khusus Jawa Timur (Level Kabupaten/Kota)
 @st.cache_data
 def load_geojson():
-    # Nama file sesuai permintaan: Jawa Timur.geojson
     geojson_path = 'Jawa Timur.geojson'
-    
     if os.path.exists(geojson_path):
         with open(geojson_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     else:
         st.error(f"❌ File '{geojson_path}' tidak ditemukan di folder root!")
-        st.info("💡 Pastikan file GeoJSON level Kabupaten/Kota sudah di-save dengan nama yang tepat.")
         return None
 
 df_scored, df_priority = load_data()
@@ -79,16 +86,47 @@ geojson_jatim = load_geojson()
 if df_scored is None or geojson_jatim is None: 
     st.stop()
 
-# Helper function untuk mencari kolom
-def get_col(df, names):
-    for name in names:
-        if name in df.columns: return name
-    return None
+# ==============================================================================
+# DATA CLEANING ENGINE FOR MAP
+# ==============================================================================
 
-# Mapping kolom CSV
-# PENTING: Pastikan isi kolom 'nama_kabupaten_kota' di CSV SAMA PERSIS dengan "NAME_2" di GeoJSON
-# Contoh: Jika di GeoJSON "KABUPATEN MALANG", di CSV harus "KABUPATEN MALANG" (bukan "Kab. Malang")
-col_nama = get_col(df_priority, ['nama_kabupaten_kota', 'Nama Kabupaten/Kota', 'kabupaten', 'region'])
+# Ekstrak nama resmi dari GeoJSON untuk referensi
+geo_names = set()
+for feature in geojson_jatim['features']:
+    name = feature['properties'].get('NAME_2', '')
+    if name:
+        geo_names.add(name.strip())
+
+def clean_name_for_map(name):
+    if pd.isna(name): return ""
+    name = str(name).upper().strip()
+    # Hapus prefix umum
+    name = re.sub(r'^KABUPATEN\s+', '', name)
+    name = re.sub(r'^KOTA\s+', '', name)
+    name = re.sub(r'^KAB\.\s+', '', name)
+    
+    # Cek kecocokan langsung
+    if name in geo_names: return name
+    
+    # Coba Title Case
+    name_clean = name.title()
+    if name_clean in geo_names: return name_clean
+    
+    return str(name).strip()
+
+# Terapkan cleaning pada kolom nama di dataframe utama
+col_nama_raw = get_col(df_scored, ['nama_kabupaten_kota', 'Nama Kabupaten/Kota', 'kabupaten', 'region'])
+
+if col_nama_raw:
+    df_scored['map_name'] = df_scored[col_nama_raw].apply(clean_name_for_map)
+else:
+    st.error("Kolom nama wilayah tidak ditemukan di CSV!")
+    st.stop()
+
+# ==============================================================================
+# MAPPING KOLOM LAINNYA
+# ==============================================================================
+
 col_score = get_col(df_priority, ['hybrid_risk_score', 'risk_score', 'score'])
 col_category = get_col(df_priority, ['risk_category', 'kategori', 'Risk Category'])
 col_signature = get_col(df_priority, ['signature_type', 'signature', 'Signature Type'])
@@ -135,11 +173,11 @@ st.markdown("---")
 st.subheader("🔍 Pencarian Status Wilayah")
 search_query = st.text_input("Ketik nama Kabupaten/Kota:", placeholder="Contoh: KABUPATEN MALANG", key="manual_search")
 
-if col_nama and search_query:
-    hasil_cari = df_scored[df_scored[col_nama].str.contains(search_query, case=False, na=False)]
+if col_nama_raw and search_query:
+    hasil_cari = df_scored[df_scored[col_nama_raw].str.contains(search_query, case=False, na=False)]
     if not hasil_cari.empty:
         row_data = hasil_cari.iloc[0]
-        nama_wilayah = str(row_data[col_nama])
+        nama_wilayah = str(row_data[col_nama_raw])
         score = parse_number(row_data[col_score]) if col_score else 0.0
         cat = str(row_data[col_category]) if col_category else "N/A"
         sig = str(row_data[col_signature]) if col_signature else "N/A"
@@ -197,29 +235,34 @@ sim_col3.metric("Estimasi Penghematan Bersih", f"Rp {net_savings:,.0f}", delta=f
 st.markdown("---")
 
 # ==============================================================================
-# 🌟 FITUR 3: PETA CHOROPLETH JAWA TIMUR (HIGHLIGHT WILAYAH)
+# 🌟 FITUR 3: PETA CHOROPLETH JAWA TIMUR
 # ==============================================================================
 st.subheader("🗺️ Peta Sebaran Risiko Jawa Timur")
 st.caption("Merah = High Risk, Kuning = Medium Risk, Hijau = Low Risk")
 
-if col_nama and col_category:
-    # Siapkan data untuk choropleth
-    map_data = df_filtered[[col_nama, col_category]].copy()
-    
-    # Buat kolom warna numerik untuk choropleth (0: Low, 1: Medium, 2: High)
-    color_map_num = {'LOW': 0, 'MEDIUM': 1, 'HIGH': 2}
-    map_data['color_val'] = map_data[col_category].map(color_map_num)
-    
+# Siapkan data untuk choropleth menggunakan kolom 'map_name' yang sudah dibersihkan
+map_data = df_filtered[['map_name', col_category]].copy()
+map_data = map_data.rename(columns={'map_name': 'location'})
+
+# Buat kolom warna numerik
+color_map_num = {'LOW': 0, 'MEDIUM': 1, 'HIGH': 2}
+map_data['color_val'] = map_data[col_category].map(color_map_num)
+
+# Hapus baris yang lokasinya kosong
+map_data = map_data.dropna(subset=['location'])
+map_data = map_data[map_data['location'] != '']
+
+if len(map_data) > 0:
     try:
         fig_map = px.choropleth_mapbox(
             map_data,
             geojson=geojson_jatim,
-            locations=col_nama,       # Kolom nama di DataFrame CSV kamu
-            featureidkey="properties.NAME_2", # KUNCI: Sesuai dengan isi file GeoJSON kamu
+            locations='location',
+            featureidkey="properties.NAME_2", # Kunci sesuai file GeoJSON Anda
             color='color_val',
-            color_continuous_scale=["#00cc96", "#ffa421", "#ff4b4b"], # Hijau -> Kuning -> Merah
+            color_continuous_scale=["#00cc96", "#ffa421", "#ff4b4b"], 
             range_color=(0, 2),
-            mapbox_style="carto-positron", # Style peta terang agar warna terlihat jelas
+            mapbox_style="carto-positron",
             zoom=7,
             center={"lat": -7.5, "lon": 112.5},
             opacity=0.7,
@@ -229,16 +272,19 @@ if col_nama and col_category:
         fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
         st.plotly_chart(fig_map, use_container_width=True)
         
+        matched_count = len(map_data)
+        total_geo = len(geojson_jatim['features'])
+        st.info(f"✅ Berhasil mencocokkan {matched_count} dari {total_geo} wilayah di GeoJSON.")
+        
     except Exception as e:
         st.error(f"⚠️ Gagal menampilkan peta. Pastikan nama di CSV cocok dengan 'NAME_2' di GeoJSON. Error: {e}")
-        st.info("💡 Tips: Buka file GeoJSON di text editor, lihat 'properties' di fitur pertama, dan pastikan namanya sama dengan di CSV.")
 else:
-    st.info("ℹ️ Data tidak lengkap untuk menampilkan peta.")
+    st.warning("ℹ️ Tidak ada data wilayah yang cocok dengan GeoJSON setelah pembersihan nama.")
 
 st.markdown("---")
 
 # ==============================================================================
-# VISUALISASI DATA LAINNYA
+# VISUALISASI DATA LAINNYA & TOP 10
 # ==============================================================================
 st.subheader("📊 Visualisasi Data")
 col1, col2 = st.columns(2)
@@ -253,26 +299,22 @@ with col2:
         fig_pie = px.pie(values=sig_counts.values, names=sig_counts.index, title="Distribusi Tipe Signature", hole=0.3)
         st.plotly_chart(fig_pie, use_container_width=True)
 
-# Scatter Plot
 st.subheader("📈 Perbandingan 2024 vs 2025")
 if col_2024 and col_2025:
-    fig_scatter = px.scatter(df_filtered, x=col_2024, y=col_2025, color=col_score, hover_data=[col_nama], title="Perubahan Jumlah Penerima Bansos", labels={col_2024: 'Penerima 2024', col_2025: 'Penerima 2025'}, color_continuous_scale='RdYlGn_r')
+    fig_scatter = px.scatter(df_filtered, x=col_2024, y=col_2025, color=col_score, hover_data=[col_nama_raw], title="Perubahan Jumlah Penerima Bansos", labels={col_2024: 'Penerima 2024', col_2025: 'Penerima 2025'}, color_continuous_scale='RdYlGn_r')
     max_val = max(parse_number(df_filtered[col_2024].max()), parse_number(df_filtered[col_2025].max()))
     fig_scatter.add_shape(type="line", x0=0, y0=0, x1=max_val, y1=max_val, line=dict(color="red", dash="dash"))
     st.plotly_chart(fig_scatter, use_container_width=True)
 
 st.markdown("---")
 
-# ==============================================================================
-# TOP 10 PRIORITAS AUDIT
-# ==============================================================================
 st.subheader("🔴 TOP 10 Prioritas Audit")
 if col_score:
     top10 = df_priority.nlargest(10, col_score)
 else: top10 = df_priority.head(10)
 
 for i, (_, row) in enumerate(top10.iterrows()):
-    nama = str(row[col_nama]).split(';')[0].strip() if col_nama else f"Wilayah {i+1}"
+    nama = str(row[col_nama_raw]).split(';')[0].strip() if col_nama_raw else f"Wilayah {i+1}"
     score = parse_number(row[col_score]) if col_score else 0.0
     cat = str(row[col_category]) if col_category else "N/A"
     sig = str(row[col_signature]) if col_signature else "N/A"
